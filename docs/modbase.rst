@@ -67,7 +67,7 @@ An additional directory ``taiyaki_modbase/intermediate_files`` contains examples
     + ``r941_dna_minion.checkpoint``
     + ``r941_rna_minion.checkpoint``
 - ``reads``
-    + 10k single-read *fast5* files for training
+    + 8k single-read *fast5* files for training
 - ``modbase_references.fasta`` 
 
 

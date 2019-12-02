@@ -314,7 +314,6 @@ class Lstm(nn.Module):
                                          ('b', _reshape(self.lstm.bias_ih_l0, (4, self.size)))])
         return res
 
-
 class GruMod(nn.Module):
     """ Gated Recurrent Unit compatable with guppy
 
@@ -439,7 +438,65 @@ class Convolution(nn.Module):
                                          ("b", self.conv.bias)])
         return res
 
+class ConvolutionPerm(nn.Module):
+    """1D convolution over the first dimension
 
+    Takes input of shape [time, batch, features] and produces output of shape
+    [ceil((time + padding) / stride), batch, features]
+
+    :param insize: number of features on input
+    :param size: number of output features
+    :param winlen: size of window over input
+    :param stride: step size between successive windows
+    :param has_bias: whether layer has bias
+    :param fun: the activation function
+    :param pad: (int, int) of padding applied to start and end, or None in which
+        case the padding used is (winlen // 2, (winlen - 1) // 2) which ensures
+        that the output length does not depend on winlen
+    """
+    def __init__(self, insize, size, winlen, stride=1, pad=None, fun=activation.tanh, has_bias=True, first=True, last=True):
+        super().__init__()
+        self.insize = insize
+        self.size = size
+        self.stride = stride
+        self.winlen = winlen
+        if pad is None:
+            pad = (winlen // 2, (winlen - 1) // 2)
+        self.padding = pad
+        self.pad = nn.ConstantPad1d(pad, 0)
+        self.conv = nn.Conv1d(kernel_size=winlen, in_channels=insize, out_channels=size, stride=stride, bias=has_bias)
+        self.activation = fun
+        self.reset_parameters()
+        self.first = first
+        self.last = last
+
+    def reset_parameters(self):
+        winit = orthonormal_matrix(self.conv.weight.shape[0], np.prod(self.conv.weight.shape[1:]))
+        init_(self.conv.weight, winit.reshape(self.conv.weight.shape))
+        binit = truncated_normal(list(self.conv.bias.shape), sd=0.5)
+        init_(self.conv.bias, binit)
+
+    def forward(self, x):
+        if self.first:
+            x = x.permute(1, 2, 0)
+        out = self.activation(self.conv(self.pad(x)))
+        if self.last:
+            out = out.permute(2, 0, 1)
+        return out
+
+    def json(self, params=False):
+        res = OrderedDict([("type", "convolution"),
+                           ("insize", self.insize),
+                           ("size", self.size),
+                           ("winlen", self.conv.kernel_size[0]),
+                           ("stride", self.conv.stride[0]),
+                           ("padding", self.padding),
+                           ("activation", self.activation.__name__)])
+        if params:
+            res['params'] = OrderedDict([("W", self.conv.weight),
+                                         ("b", self.conv.bias)])
+        return res
+    
 class Parallel(nn.Module):
     def __init__(self, layers):
         super().__init__()
@@ -482,7 +539,7 @@ class Serial(nn.Module):
         super().__init__()
         self.sublayers = nn.ModuleList(layers)
 
-    def forward(self, x):
+    def forward(self, x, verbose=False):
         for layer in self.sublayers:
             x = layer(x)
         return x
@@ -642,6 +699,61 @@ def global_norm_flipflop(scores):
         logZ = logZ + factors
     return scores - logZ / T
 
+class GlobalNormFlipFlop_bases(nn.Module):
+    def __init__(self, insize, nbase, has_bias=True, _never_use_cupy=False):
+        super().__init__()
+        self.insize = insize
+        self.nbase = nbase
+        self.size = nbase #flipflopfings.nstate_flipflop(nbase)
+        self.has_bias = has_bias
+        self.linear = nn.Linear(insize, self.size, bias=has_bias)
+        self.reset_parameters()
+        self._never_use_cupy = _never_use_cupy
+
+    def json(self, params=False):
+        res = OrderedDict([
+            ('type', 'GlobalNormTwoState'),
+            ('size', self.size),
+            ('insize', self.insize),
+            ('bias', self.has_bias)])
+        if params:
+            res['params'] = OrderedDict(
+                [('W', self.linear.weight)] +
+                [('b', self.linear.bias)] if self.has_bias else [])
+
+        return res
+
+    def reset_parameters(self):
+        winit = orthonormal_matrix(*list(self.linear.weight.shape))
+        init_(self.linear.weight, winit)
+        if self.has_bias:
+            binit = truncated_normal(list(self.linear.bias.shape), sd=0.5)
+            init_(self.linear.bias, binit)
+
+    def _use_cupy(self, x):
+        # getattr in stead of simple look-up for backwards compatibility
+        if getattr(self, '_never_use_cupy', False):
+            return False
+
+        if not x.is_cuda:
+            return False
+
+        try:
+            from .cupy_extensions import flipflop
+            return True
+        except ImportError:
+            return False
+
+    def forward(self, x):
+        y = activation.relu(self.linear(x)) #5.0 * activation.tanh(self.linear(x))
+        return y
+        ''' 
+        if self._use_cupy(x):
+            from .cupy_extensions import flipflop
+            return flipflop.global_norm(y)
+        else:
+            return global_norm_flipflop(y)
+        '''
 
 class GlobalNormFlipFlop(nn.Module):
     def __init__(self, insize, nbase, has_bias=True, _never_use_cupy=False):

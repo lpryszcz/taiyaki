@@ -4,7 +4,7 @@ from taiyaki.layers import Convolution, GruMod, Reverse, Serial, GlobalNormFlipF
 
 
 def network(insize=1, size=256, winlen=19, stride=2, outsize=40):
-    nbase = nbase_flipflop(outsize)
+    nbase = nbase_flipflop(outsize) #2 * nbase * (nbase + 1) -> 40 if nbase=4, but why??
 
     return Serial([
         Convolution(insize, size, winlen, stride=stride, fun=tanh),

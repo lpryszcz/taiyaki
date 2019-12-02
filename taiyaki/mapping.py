@@ -192,7 +192,7 @@ class Mapping:
         else:
             first_nonzero_refpos = reflen
         putative_ref_to_sig = np.append(-1 * np.ones(first_nonzero_refpos, dtype=np.int32), putative_ref_to_sig)
-
+        #print(reflen, len(putative_ref_to_sig))# reflen + 1 - len(putative_ref_to_sig)); print(putative_ref_to_sig); 
         ref_to_sig = np.append(putative_ref_to_sig, siglen * np.ones(reflen +
                                                                      1 - len(putative_ref_to_sig), dtype=np.int32))
 
